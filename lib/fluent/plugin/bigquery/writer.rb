@@ -1,7 +1,7 @@
 module Fluent
   module BigQuery
     class Writer
-      def initialize(log, auth_method, options = {})
+      def initialize(log, auth_method, **options)
         @auth_method = auth_method
         @scope = "https://www.googleapis.com/auth/bigquery"
         @options = options
@@ -35,8 +35,9 @@ module Fluent
           }
 
           definition.merge!(time_partitioning: time_partitioning) if time_partitioning
+          definition.merge!(require_partition_filter: require_partition_filter) if require_partition_filter
           definition.merge!(clustering: clustering) if clustering
-          client.insert_table(project, dataset, definition, {})
+          client.insert_table(project, dataset, definition, **{})
           log.debug "create table", project_id: project, dataset: dataset, table: table_id
         rescue Google::Apis::ServerError, Google::Apis::ClientError, Google::Apis::AuthorizationError => e
           message = e.message
@@ -82,7 +83,7 @@ module Fluent
         if @options[:auto_create_table]
           res = insert_all_table_data_with_create_table(project, dataset, table_id, body, schema)
         else
-          res = client.insert_all_table_data(project, dataset, table_id, body, {})
+          res = client.insert_all_table_data(project, dataset, table_id, body, **{})
         end
         log.debug "insert rows", project_id: project, dataset: dataset, table: table_id, count: rows.size
 
@@ -157,10 +158,8 @@ module Fluent
         res = client.insert_job(
           project,
           configuration,
-          {
-            upload_source: upload_source,
-            content_type: "application/octet-stream",
-          }
+          upload_source: upload_source,
+          content_type: "application/octet-stream",
         )
         JobReference.new(chunk_id, chunk_id_hex, project, dataset, table_id, res.job_reference.job_id)
       rescue Google::Apis::ServerError, Google::Apis::ClientError, Google::Apis::AuthorizationError => e
@@ -318,6 +317,16 @@ module Fluent
         end
       end
 
+      def require_partition_filter
+        return @require_partition_filter if instance_variable_defined?(:@require_partition_filter)
+
+        if @options[:require_partition_filter]
+          @require_partition_filter = @options[:require_partition_filter]
+        else
+          @require_partition_filter
+        end
+      end
+
       def clustering
         return @clustering if instance_variable_defined?(:@clustering)
 
@@ -332,13 +341,13 @@ module Fluent
 
       def insert_all_table_data_with_create_table(project, dataset, table_id, body, schema)
         try_count ||= 1
-        res = client.insert_all_table_data(project, dataset, table_id, body, {})
+        res = client.insert_all_table_data(project, dataset, table_id, body, **{})
       rescue Google::Apis::ClientError => e
         if e.status_code == 404 && /Not Found: Table/i =~ e.message
           if try_count == 1
             # Table Not Found: Auto Create Table
             create_table(project, dataset, table_id, schema)
-          elsif try_count > 10
+          elsif try_count > 60 # timeout in about 300 seconds
             raise "A new table was created but it is not found."
           end
 

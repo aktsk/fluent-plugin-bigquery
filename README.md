@@ -1,13 +1,5 @@
 # fluent-plugin-bigquery
 
-## Notice
-
-We will transfer fluent-plugin-bigquery repository to [fluent-plugins-nursery](https://github.com/fluent-plugins-nursery) organization.
-It does not change maintenance plan.
-The main purpose is that it solves mismatch between maintainers and current organization. 
-
----
-
 [Fluentd](http://fluentd.org) output plugin to load/insert data into Google BigQuery.
 
 - **Plugin type**: Output
@@ -31,6 +23,7 @@ OAuth flow for installed applications.
 | v0.4.x         | 0.12.x          | 2.0 or later |
 | v1.x.x         | 0.14.x or later | 2.2 or later |
 | v2.x.x         | 0.14.x or later | 2.3 or later |
+| v3.x.x         | 1.x or later    | 2.7 or later |
 
 ## With docker image
 If you use official alpine based fluentd docker image (https://github.com/fluent/fluentd-docker-image),
@@ -60,7 +53,7 @@ Because embbeded gem dependency sometimes restricts ruby environment.
 | auto_create_table                             | bool          | no                                           | no           | false                      | If true, creates table automatically                                                                   |
 | ignore_unknown_values                         | bool          | no                                           | no           | false                      | Accept rows that contain values that do not match the schema. The unknown values are ignored.          |
 | schema                                        | array         | yes (either `fetch_schema` or `schema_path`) | no           | nil                        | Schema Definition. It is formatted by JSON.                                                            |
-| schema_path                                   | string        | yes (either `fetch_schema`)                  | no           | nil                        | Schema Definition file path. It is formatted by JSON.                                                  |
+| schema_path                                   | string        | yes (either `fetch_schema`)                  | yes          | nil                        | Schema Definition file path. It is formatted by JSON.                                                  |
 | fetch_schema                                  | bool          | yes (either `schema_path`)                   | no           | false                      | If true, fetch table schema definition from Bigquery table automatically.                              |
 | fetch_schema_table                            | string        | no                                           | yes          | nil                        | If set, fetch table schema definition from this table, If fetch_schema is false, this param is ignored |
 | schema_cache_expire                           | integer       | no                                           | no           | 600                        | Value is second. If current time is after expiration interval, re-fetch table schema definition.       |
@@ -80,6 +73,7 @@ Because embbeded gem dependency sometimes restricts ruby environment.
 | insert_id_field                        | string        | no           | no           | nil                        | Use key as `insert_id` of Streaming Insert API parameter. see. https://docs.fluentd.org/v1.0/articles/api-plugin-helper-record_accessor                                                    |
 | add_insert_timestamp                   | string        | no           | no           | nil                        | Adds a timestamp column just before sending the rows to BigQuery, so that buffering time is not taken into account. Gives a field in BigQuery which represents the insert time of the row. |
 | allow_retry_insert_errors              | bool          | no           | no           | false                      | Retry to insert rows when an insertErrors occurs. There is a possibility that rows are inserted in duplicate.                                                                              |
+| require_partition_filter    | bool          | no                                           | no           | false                      | If true, queries over this table require a partition filter that can be used for partition elimination to be specified. |
 
 #### bigquery_load
 
@@ -387,10 +381,10 @@ format to construct table ids.
 Table ids are formatted at runtime
 using the chunk key time.
 
-see. http://docs.fluentd.org/v0.14/articles/output-plugin-overview
+see. https://docs.fluentd.org/configuration/buffer-section
 
 For example, with the configuration below,
-data is inserted into tables `accesslog_2014_08`, `accesslog_2014_09` and so on.
+data is inserted into tables `accesslog_2014_08_02`, `accesslog_2014_08_03` and so on.
 
 ```apache
 <match dummy>
@@ -400,7 +394,7 @@ data is inserted into tables `accesslog_2014_08`, `accesslog_2014_09` and so on.
 
   project yourproject_id
   dataset yourdataset_id
-  table   accesslog_%Y_%m
+  table   accesslog_%Y_%m_%d
 
   <buffer time>
     timekey 1d
@@ -408,6 +402,8 @@ data is inserted into tables `accesslog_2014_08`, `accesslog_2014_09` and so on.
   ...
 </match>
 ```
+
+**NOTE: In current fluentd (v1.15.x), The maximum unit supported by strftime formatting is the granularity of days**
 
 #### record attribute formatting
 The format can be suffixed with attribute name.

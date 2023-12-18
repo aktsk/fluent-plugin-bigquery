@@ -23,23 +23,23 @@ module Fluent
 
       attr_reader :name, :mode
 
-      def format(value)
+      def format(value, is_load: false)
         case @mode
         when :nullable
-          format_one(value) unless value.nil?
+          format_one(value, is_load: is_load) unless value.nil?
         when :required
           if value.nil?
             log.warn "Required field #{name} cannot be null"
             nil
           else
-            format_one(value)
+            format_one(value, is_load: is_load)
           end
         when :repeated
-          value.nil? ? [] : value.each_with_object([]) { |v, arr| arr << format_one(v) if v }
+          value.nil? ? [] : value.each_with_object([]) { |v, arr| arr << format_one(v, is_load: true) if v }
         end
       end
 
-      def format_one(value)
+      def format_one(value, is_load: false)
         raise NotImplementedError, "Must implement in a subclass"
       end
 
@@ -57,7 +57,7 @@ module Fluent
         :string
       end
 
-      def format_one(value)
+      def format_one(value, is_load: false)
         if value.is_a?(Hash) || value.is_a?(Array)
           MultiJson.dump(value)
         else
@@ -66,12 +66,32 @@ module Fluent
       end
     end
 
+    class JsonFieldSchema < FieldSchema
+      def type
+        :json
+      end
+
+      def format_one(value, is_load: false)
+        if is_load
+          value
+        else
+          MultiJson.dump(value)
+        end
+      end
+    end
+
+    class GeographyFieldSchema < StringFieldSchema
+      def type
+        :geography
+      end
+    end
+
     class IntegerFieldSchema < FieldSchema
       def type
         :integer
       end
 
-      def format_one(value)
+      def format_one(value, is_load: false)
         value.to_i
       end
     end
@@ -81,7 +101,7 @@ module Fluent
         :float
       end
 
-      def format_one(value)
+      def format_one(value, is_load: false)
         value.to_f
       end
     end
@@ -91,17 +111,27 @@ module Fluent
         :numeric
       end
 
-      def format_one(value)
+      def format_one(value, is_load: false)
         value.to_s
       end
     end
+
+    class BigNumericFieldSchema < FieldSchema
+      def type
+        :bignumeric
+      end
+
+      def format_one(value, is_load: false)
+        value.to_s
+      end
+    end    
 
     class BooleanFieldSchema < FieldSchema
       def type
         :boolean
       end
 
-      def format_one(value)
+      def format_one(value, is_load: false)
         !!value
       end
     end
@@ -114,7 +144,7 @@ module Fluent
         :timestamp
       end
 
-      def format_one(value)
+      def format_one(value, is_load: false)
         case value
         when Time
           value.strftime("%Y-%m-%d %H:%M:%S.%6L %:z")
@@ -137,7 +167,7 @@ module Fluent
         :date
       end
 
-      def format_one(value)
+      def format_one(value, is_load: false)
         if value.respond_to?(:strftime)
           value.strftime("%Y-%m-%d")
         else
@@ -151,7 +181,7 @@ module Fluent
         :datetime
       end
 
-      def format_one(value)
+      def format_one(value, is_load: false)
         if value.respond_to?(:strftime)
           value.strftime("%Y-%m-%dT%H:%M:%S.%6L")
         else
@@ -165,7 +195,7 @@ module Fluent
         :time
       end
 
-      def format_one(value)
+      def format_one(value, is_load: false)
         if value.respond_to?(:strftime)
           value.strftime("%H:%M:%S.%6L")
         else
@@ -180,11 +210,14 @@ module Fluent
         integer: IntegerFieldSchema,
         float: FloatFieldSchema,
         numeric: NumericFieldSchema,
+        bignumeric: BigNumericFieldSchema,
         boolean: BooleanFieldSchema,
         timestamp: TimestampFieldSchema,
         date: DateFieldSchema,
         datetime: DateTimeFieldSchema,
         time: TimeFieldSchema,
+        json: JsonFieldSchema,
+        geography: GeographyFieldSchema,
         record: RecordSchema
       }.freeze
 
@@ -256,12 +289,12 @@ module Fluent
         end
       end
 
-      def format_one(record)
+      def format_one(record, is_load: false)
         out = {}
         record.each do |key, value|
           next if value.nil?
           schema = @fields[key]
-          out[key] = schema ? schema.format(value) : value
+          out[key] = schema ? schema.format(value, is_load: is_load) : value
         end
         out
       end

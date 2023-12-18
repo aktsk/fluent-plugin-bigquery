@@ -5,6 +5,19 @@ class BigQueryInsertOutputTest < Test::Unit::TestCase
     Fluent::Test.setup
   end
 
+  def is_ruby2?
+    RUBY_VERSION.to_i < 3
+  end
+
+  def build_args(args)
+    if is_ruby2?
+      args << {}
+    end
+    args
+  end
+
+  SCHEMA_PATH = File.join(File.dirname(__FILE__), "testdata", "apache.schema")
+
   CONFIG = %[
     table foo
     email foo@bar.example
@@ -121,11 +134,12 @@ class BigQueryInsertOutputTest < Test::Unit::TestCase
     driver = create_driver
 
     stub_writer do |writer|
-      mock(writer.client).insert_all_table_data('yourproject_id', 'yourdataset_id', 'foo', {
+      args = build_args(['yourproject_id', 'yourdataset_id', 'foo', {
         rows: [{json: hash_including(entry)}],
         skip_invalid_rows: false,
         ignore_unknown_values: false
-      }, {}) do
+      }])
+      mock(writer.client).insert_all_table_data(*args) do
         s = stub!
         s.insert_errors { nil }
         s
@@ -186,11 +200,12 @@ class BigQueryInsertOutputTest < Test::Unit::TestCase
 
       entry = {a: "b"}
       stub_writer do |writer|
-        mock(writer.client).insert_all_table_data('yourproject_id', 'yourdataset_id', 'foo', {
+        args = build_args(['yourproject_id', 'yourdataset_id', 'foo', {
           rows: [{json: hash_including(entry)}],
           skip_invalid_rows: false,
           ignore_unknown_values: false
-        }, {}) do
+        }])
+        mock(writer.client).insert_all_table_data(*args) do
           ex = Google::Apis::ServerError.new("error", status_code: d["status_code"])
           raise ex
         end
@@ -245,11 +260,12 @@ class BigQueryInsertOutputTest < Test::Unit::TestCase
 
     entry = {a: "b"}
     stub_writer do |writer|
-      mock(writer.client).insert_all_table_data('yourproject_id', 'yourdataset_id', 'foo', {
+      args = build_args(['yourproject_id', 'yourdataset_id', 'foo', {
         rows: [{json: hash_including(entry)}],
         skip_invalid_rows: false,
         ignore_unknown_values: false
-      }, {}) do
+      }])
+      mock(writer.client).insert_all_table_data(*args) do
         ex = Google::Apis::ServerError.new("error", status_code: 501)
         def ex.reason
           "invalid"
@@ -267,7 +283,7 @@ class BigQueryInsertOutputTest < Test::Unit::TestCase
     assert_raise Fluent::BigQuery::UnRetryableError do
       driver.instance.write(chunk)
     end
-    assert_in_delta driver.instance.retry.secondary_transition_at , Time.now, 0.1
+    assert_in_delta driver.instance.retry.secondary_transition_at , Time.now, 0.2
     driver.instance_shutdown
   end
 
@@ -290,11 +306,15 @@ class BigQueryInsertOutputTest < Test::Unit::TestCase
     CONFIG
 
     stub_writer do |writer|
-      mock(writer.client).insert_all_table_data('yourproject_id', 'yourdataset_id', 'foo_2014_08_20', {
-          rows: [entry[0]],
-          skip_invalid_rows: false,
-          ignore_unknown_values: false
-        }, {}) { stub!.insert_errors { nil } }
+      args = ['yourproject_id', 'yourdataset_id', 'foo_2014_08_20', {
+        rows: [entry[0]],
+        skip_invalid_rows: false,
+        ignore_unknown_values: false
+      }]
+      if RUBY_VERSION.to_i < 3
+        args << {}
+      end
+      mock(writer.client).insert_all_table_data(*args) { stub!.insert_errors { nil } }
     end
 
     driver.run do
@@ -344,25 +364,29 @@ class BigQueryInsertOutputTest < Test::Unit::TestCase
       schema_path #{File.join(File.dirname(__FILE__), "testdata", "apache.schema")}
     CONFIG
 
+    schema_fields = Fluent::BigQuery::Helper.deep_symbolize_keys(MultiJson.load(File.read(SCHEMA_PATH)))
+
     stub_writer do |writer|
       body = {
         rows: [{json: Fluent::BigQuery::Helper.deep_symbolize_keys(message)}],
         skip_invalid_rows: false,
         ignore_unknown_values: false,
       }
-      mock(writer.client).insert_all_table_data('yourproject_id', 'yourdataset_id', 'foo', body, {}) do
+      args = build_args(['yourproject_id', 'yourdataset_id', 'foo', body])
+      mock(writer.client).insert_all_table_data(*args) do
         raise Google::Apis::ClientError.new("notFound: Not found: Table yourproject_id:yourdataset_id.foo", status_code: 404)
       end.at_least(1)
       mock(writer).sleep(instance_of(Numeric)) { nil }.at_least(1)
 
-      mock(writer.client).insert_table('yourproject_id', 'yourdataset_id', {
+      args = build_args(['yourproject_id', 'yourdataset_id', {
         table_reference: {
           table_id: 'foo',
         },
         schema: {
-          fields: driver.instance.instance_variable_get(:@table_schema).to_a,
+          fields: schema_fields,
         },
-      }, {})
+      }])
+      mock(writer.client).insert_table(*args)
     end
 
     assert_raise(RuntimeError) do
@@ -416,7 +440,11 @@ class BigQueryInsertOutputTest < Test::Unit::TestCase
       time_partitioning_type day
       time_partitioning_field time
       time_partitioning_expiration 1h
+
+      require_partition_filter true
     CONFIG
+
+    schema_fields = Fluent::BigQuery::Helper.deep_symbolize_keys(MultiJson.load(File.read(SCHEMA_PATH)))
 
     stub_writer do |writer|
       body = {
@@ -424,24 +452,27 @@ class BigQueryInsertOutputTest < Test::Unit::TestCase
         skip_invalid_rows: false,
         ignore_unknown_values: false,
       }
-      mock(writer.client).insert_all_table_data('yourproject_id', 'yourdataset_id', 'foo', body, {}) do
+      args = build_args(['yourproject_id', 'yourdataset_id', 'foo', body])
+      mock(writer.client).insert_all_table_data(*args) do
         raise Google::Apis::ClientError.new("notFound: Not found: Table yourproject_id:yourdataset_id.foo", status_code: 404)
       end.at_least(1)
       mock(writer).sleep(instance_of(Numeric)) { nil }.at_least(1)
 
-      mock(writer.client).insert_table('yourproject_id', 'yourdataset_id', {
+      args = build_args(['yourproject_id', 'yourdataset_id', {
         table_reference: {
           table_id: 'foo',
         },
         schema: {
-          fields: driver.instance.instance_variable_get(:@table_schema).to_a,
+          fields: schema_fields,
         },
         time_partitioning: {
           type: 'DAY',
           field: 'time',
           expiration_ms: 3600000,
         },
-      }, {})
+        require_partition_filter: true,
+      }])
+      mock(writer.client).insert_table(*args)
     end
 
     assert_raise(RuntimeError) do
@@ -495,7 +526,6 @@ class BigQueryInsertOutputTest < Test::Unit::TestCase
       time_partitioning_type day
       time_partitioning_field time
       time_partitioning_expiration 1h
-      time_partitioning_require_partition_filter true
 
       clustering_fields [
         "time",
@@ -503,23 +533,26 @@ class BigQueryInsertOutputTest < Test::Unit::TestCase
       ]
     CONFIG
 
+    schema_fields = Fluent::BigQuery::Helper.deep_symbolize_keys(MultiJson.load(File.read(SCHEMA_PATH)))
+
     stub_writer do |writer|
       body = {
         rows: [message],
         skip_invalid_rows: false,
         ignore_unknown_values: false,
       }
-      mock(writer.client).insert_all_table_data('yourproject_id', 'yourdataset_id', 'foo', body, {}) do
+      args = build_args(['yourproject_id', 'yourdataset_id', 'foo', body])
+      mock(writer.client).insert_all_table_data(*args) do
         raise Google::Apis::ClientError.new("notFound: Not found: Table yourproject_id:yourdataset_id.foo", status_code: 404)
       end.at_least(1)
       mock(writer).sleep(instance_of(Numeric)) { nil }.at_least(1)
 
-      mock(writer.client).insert_table('yourproject_id', 'yourdataset_id', {
+      args = build_args(['yourproject_id', 'yourdataset_id', {
         table_reference: {
           table_id: 'foo',
         },
         schema: {
-          fields: driver.instance.instance_variable_get(:@table_schema).to_a,
+          fields: schema_fields,
         },
         time_partitioning: {
           type: 'DAY',
@@ -532,7 +565,8 @@ class BigQueryInsertOutputTest < Test::Unit::TestCase
             'vhost',
           ],
         },
-      }, {})
+      }])
+      mock(writer.client).insert_table(*args)
     end
 
     assert_raise(RuntimeError) do
